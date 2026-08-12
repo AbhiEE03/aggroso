@@ -23,4 +23,8 @@ export const updateSkill = (id, data) => api.put(`/skills/${id}`, data);
 /** Publish a draft skill */
 export const publishSkill = (id) => api.post(`/skills/${id}/publish`);
 
+/** Run a read-only test against a skill with sample input */
+export const testSkill = (id, sampleInput) =>
+  api.post(`/skills/${id}/test`, { sampleInput });
+
 export default api;

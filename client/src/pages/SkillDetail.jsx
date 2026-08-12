@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getSkill, publishSkill } from '../api/skills';
+import TestSkillPanel from '../components/TestSkillPanel';
 
 export default function SkillDetail() {
   const { id } = useParams();
@@ -201,6 +202,11 @@ export default function SkillDetail() {
             </div>
           </>
         )}
+      </div>
+
+      {/* Test Skill Panel — shown for all skills (published gets the full test, draft gets a preview) */}
+      <div className="card" style={{ marginTop: '16px' }}>
+        <TestSkillPanel skill={skill} />
       </div>
     </>
   );
