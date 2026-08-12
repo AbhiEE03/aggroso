@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const baseURL = import.meta.env.VITE_API_URL || "/api";
+
 const api = axios.create({
-	baseURL: "/api",
+	baseURL: baseURL,
 	headers: { "Content-Type": "application/json" },
 });
 
@@ -30,5 +32,12 @@ export const testSkill = (id, sampleInput) =>
 /** Execute a published skill with real Gemini planning */
 export const executeSkill = (id, input) =>
 	api.post(`/skills/${id}/execute`, { input });
+
+/** Fetch all versions of a skill */
+export const getSkillVersions = (id) => api.get(`/skills/${id}/versions`);
+
+/** Compare two versions of a skill */
+export const compareSkillVersions = (from, to) =>
+  api.get(`/skills/versions/compare`, { params: { from, to } });
 
 export default api;

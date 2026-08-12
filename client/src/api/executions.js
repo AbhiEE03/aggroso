@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: "/api/executions" });
+const baseURL = (import.meta.env.VITE_API_URL || "/api") + "/executions";
+const api = axios.create({ baseURL });
 
 export const getExecution = (id) => api.get(`/${id}`);
 export const listExecutions = (params = {}) => api.get("/", { params });
@@ -10,5 +11,6 @@ export const rejectStep = (executionId, stepNumber, rejectedBy = "user") =>
 	api.post(`/${executionId}/steps/${stepNumber}/reject`, { rejectedBy });
 export const cancelExecution = (executionId) =>
 	api.post(`/${executionId}/cancel`);
+export const getExecutionAuditLog = (id) => api.get(`/${id}/audit-log`);
 
 export default api;
