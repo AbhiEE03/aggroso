@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getSkill, publishSkill } from '../api/skills';
+import { getSkill, publishSkill, executeSkill } from '../api/skills';
 import TestSkillPanel from '../components/TestSkillPanel';
+import { buildDefaultInput } from '../utils/schemaHelpers';
 
 export default function SkillDetail() {
   const { id } = useParams();
@@ -10,6 +11,7 @@ export default function SkillDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [publishing, setPublishing] = useState(false);
+  const [executing, setExecuting] = useState(false);
 
   const fetchSkill = async () => {
     try {
@@ -40,6 +42,20 @@ export default function SkillDetail() {
       alert(err.response?.data?.message || 'Failed to publish skill');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const handleExecute = async () => {
+    // Build default input from inputSchema for the quick-launch button
+    const defaultInput = buildDefaultInput(skill.inputSchema);
+    setExecuting(true);
+    try {
+      const res = await executeSkill(id, defaultInput);
+      navigate(`/executions/${res.data._id}`);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to start execution');
+    } finally {
+      setExecuting(false);
     }
   };
 
@@ -75,7 +91,7 @@ export default function SkillDetail() {
         </button>
       </div>
 
-      {/* Actions */}
+      {/* Actions — Draft */}
       {skill.status === 'draft' && (
         <div className="actions-row" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none', marginBottom: '24px' }}>
           <button
@@ -91,6 +107,20 @@ export default function SkillDetail() {
             onClick={() => navigate(`/skills/${id}/edit`)}
           >
             ✏️ Edit Draft
+          </button>
+        </div>
+      )}
+
+      {/* Actions — Published */}
+      {skill.status === 'published' && (
+        <div className="actions-row" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none', marginBottom: '24px' }}>
+          <button
+            id="execute-skill-btn"
+            className="btn btn-primary"
+            onClick={handleExecute}
+            disabled={executing}
+          >
+            {executing ? 'Starting…' : '▶ Execute with Gemini'}
           </button>
         </div>
       )}

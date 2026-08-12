@@ -27,4 +27,8 @@ export const publishSkill = (id) => api.post(`/skills/${id}/publish`);
 export const testSkill = (id, sampleInput) =>
   api.post(`/skills/${id}/test`, { sampleInput });
 
+/** Execute a published skill with real Gemini planning */
+export const executeSkill = (id, input) =>
+  api.post(`/skills/${id}/execute`, { input });
+
 export default api;

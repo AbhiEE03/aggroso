@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { testSkill } from '../api/skills';
+import { buildDefaultInput } from '../utils/schemaHelpers';
 
 const STATUS_STYLES = {
   success: { color: 'var(--accent-green)', label: '✓ Success' },
@@ -235,23 +236,4 @@ export default function TestSkillPanel({ skill }) {
       )}
     </div>
   );
-}
-
-/**
- * Build a default sample input based on the skill's inputSchema.
- * Just generates an empty object with required string fields pre-filled.
- */
-function buildDefaultInput(schema) {
-  if (!schema || typeof schema !== 'object') return {};
-  const result = {};
-  const props = schema.properties || {};
-  const required = schema.required || [];
-  for (const key of required) {
-    const prop = props[key] || {};
-    if (prop.type === 'string') result[key] = '';
-    else if (prop.type === 'number' || prop.type === 'integer') result[key] = 0;
-    else if (prop.type === 'boolean') result[key] = false;
-    else result[key] = null;
-  }
-  return result;
 }

@@ -9,6 +9,7 @@ const { validateJsonSchema, validateAllowedTools } = require('../validators/skil
 const { executeTool } = require('../tools/index');
 const { selectToolsFromInstructions } = require('../utils/toolSelector');
 const { UnauthorizedToolError, ApprovalRequiredError } = require('../errors/toolErrors');
+const { startExecution } = require('../services/executionEngine');
 
 const ajv = new Ajv({ strict: false, allErrors: true });
 addFormats(ajv);
@@ -81,7 +82,7 @@ router.post('/', async (req, res, next) => {
       ...req.body,
       status: 'draft',   // always starts as draft; caller cannot override
       version: 1,
-      previousVersionId: null,
+      previousVersionId: req.body.previousVersionId || null,
     });
 
     return res.status(201).json(skill);
@@ -353,6 +354,77 @@ router.post('/:id/test', async (req, res, next) => {
       results: toolResults,
       warning: 'Tool selection in this response uses keyword matching, NOT real LLM planning. Phase 3 replaces this.',
     });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      const castErr = new Error('Invalid skill ID format');
+      castErr.statusCode = 400;
+      return next(castErr);
+    }
+    return next(err);
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /api/skills/:id/execute — Real agent execution (Phase 3)
+//
+// Unlike /test (keyword-based, read-only), this runs the REAL Gemini planning
+// loop and executes tools according to the model's structured plan.
+//
+// Requirements:
+//   - skill must be PUBLISHED (cannot execute a draft)
+//   - body must include "input" matching the skill's inputSchema
+//   - write tools in approvalRequiredActions will pause the run
+// ─────────────────────────────────────────────
+router.post('/:id/execute', async (req, res, next) => {
+  try {
+    const skill = await Skill.findById(req.params.id);
+    if (!skill) {
+      const err = new Error('Skill not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    // Only published skills can be executed
+    if (skill.status !== 'published') {
+      const err = new Error(
+        `Only published skills can be executed. This skill is in "${skill.status}" status.`
+      );
+      err.statusCode = 409;
+      return next(err);
+    }
+
+    const { input } = req.body;
+    if (input === undefined) {
+      const err = new Error('Request body must include "input"');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Validate input against the skill's inputSchema
+    let validate;
+    try {
+      validate = ajv.compile(skill.inputSchema);
+    } catch (compileErr) {
+      const err = new Error('Skill inputSchema could not be compiled');
+      err.statusCode = 500;
+      return next(err);
+    }
+
+    const inputValid = validate(input);
+    if (!inputValid) {
+      const err = new Error('input does not match the skill\'s inputSchema');
+      err.statusCode = 400;
+      err.details = validate.errors.map((e) => `${e.instancePath} ${e.message}`.trim());
+      return next(err);
+    }
+
+    // Start the execution — returns immediately with the run in its current state
+    // (may be 'running', 'awaiting_approval', 'completed', or 'failed')
+    const run = await startExecution(skill, input);
+
+    // 202 Accepted if awaiting approval, 200 if completed or failed synchronously
+    const statusCode = run.status === 'awaiting_approval' ? 202 : 200;
+    return res.status(statusCode).json(run);
   } catch (err) {
     if (err.name === 'CastError') {
       const castErr = new Error('Invalid skill ID format');

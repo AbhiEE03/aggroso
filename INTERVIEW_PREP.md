@@ -68,3 +68,36 @@ The keyword-based tool selector in Phase 2 is genuinely dumb — it matches subs
 
 **Why seeded hardcoded data for docSearch and recordLookup?** The project spec says the tool surface is bounded on purpose. Real search would require a vector database or Elasticsearch setup, which adds complexity without demonstrating the key concepts (permissions, approval, idempotency). Seeded arrays let us demonstrate the tool working correctly while keeping the infrastructure minimal. An interviewer asking "why not real search?" gets the answer: "the interesting parts of this system are the permission layer and execution control, not the search backend — we used a stub to keep focus."
 
+
+
+---
+
+## Phase 3 Entry — 2026-08-12
+
+### What Was Built and Why
+
+Phase 3 is the core engine of the project. It replaces the keyword-based placeholder with real Gemini-driven planning, introduces an async execution loop that actually runs the plan, and implements a pause-and-resume approval gate for write operations.
+
+The system now creates an `ExecutionRun` record the moment execution begins. It calls Gemini (`gemini-2.5-flash`) to generate a structured JSON plan (an array of `{tool, toolInput, reasoning}`). The execution engine then loops through the plan. If it hits a read-only tool, it executes it. If it hits a write tool (like `taskCreator`), it pauses, sets the run status to `awaiting_approval`, and returns early. The user reviews the pending step in the UI, clicks "Approve", and the engine resumes execution from that exact step.
+
+We also built `ExecutionView.jsx` — a live-updating trace UI that polls the backend until the run reaches a terminal state.
+
+### The 2–3 Trickiest Design Decisions
+
+**1. Why use responseMimeType="application/json" for planning?**
+We need Gemini to act as a structured planner. If we just ask for text, we have to parse out code blocks or use a second LLM call to extract the JSON. By setting `responseMimeType: 'application/json'` and heavily tuning the system prompt to show exactly what tools are available and what inputs they take, we get deterministic, machine-readable steps. We fall back to a retry just in case, but it's much more stable than parsing markdown prose.
+
+**2. Why embed the steps in the ExecutionRun document instead of using separate collections?**
+Atomic updates and fast reads. The entire state of a run (its plan, which steps are done, the outputs, the current status) is in one document. When the UI polls for updates, we do a single `findById()`. When we pause for approval, we update the embedded array and `run.status` in one atomic `save()`.
+
+**3. How does idempotency work on resume?**
+When the plan is generated, we pre-compute a deterministic `idempotencyKey` for every write step (`hash(executionId + stepNumber + toolInput)`). We pass this key to the tool. The `MockTask` model uses it as a unique sparse index. If the system crashes right after `taskCreator` succeeds but before the engine can mark the step as "success", the user might try to approve/run it again. The database will reject the duplicate key, the engine sees the error, and we prevent duplicate tasks from being created.
+
+### One Known Weak Point
+
+The polling UI in `ExecutionView.jsx`. It polls every 2.5 seconds while the run is non-terminal. In a real-world high-traffic app, you'd want to use Server-Sent Events (SSE) or WebSockets to push updates from the execution engine directly to the client. We used polling here because it's vastly simpler to implement and debug for a take-home project, and the volume is exactly 1 user.
+
+### Why X Over Y
+
+**Why `gemini-2.5-flash` instead of `gemini-2.5-pro`?**
+For this specific task — reading a prompt and outputting a short JSON array — Flash is the perfect fit. It's incredibly fast, natively supports JSON output, and has "thinking" capabilities for reasoning. Pro would be slower without any noticeable improvement in the rigid JSON structure we require. Speed matters when the user is staring at a "Planning..." spinner.
