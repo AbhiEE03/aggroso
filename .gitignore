@@ -19,3 +19,6 @@ npm-debug.log*
 # Editor
 .vscode/
 .idea/
+
+# Local-only documents
+INTERVIEW_PREP.md
