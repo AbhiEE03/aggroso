@@ -4,6 +4,7 @@ const AuditLog = require('../models/AuditLog');
 const { generatePlan, synthesizeFinalOutput } = require('./geminiPlanner');
 const { executeTool } = require('../tools/index');
 const { UnauthorizedToolError, ApprovalRequiredError } = require('../errors/toolErrors');
+const logger = require('../utils/logger');
 
 /**
  * audit — convenience helper to append an AuditLog entry.
@@ -11,9 +12,10 @@ const { UnauthorizedToolError, ApprovalRequiredError } = require('../errors/tool
 const audit = async (executionId, actorType, action, detail = null) => {
   try {
     await AuditLog.create({ executionId, actorType, action, detail });
-  } catch {
+    logger.info(`[Audit] ${action}`, { executionId, actorType, detail });
+  } catch (err) {
     // Never let audit logging crash the execution
-    console.error('[Audit] Failed to write log entry:', action);
+    logger.error(`[Audit] Failed to write log entry: ${action}`, { error: err.message });
   }
 };
 

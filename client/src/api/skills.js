@@ -31,4 +31,11 @@ export const testSkill = (id, sampleInput) =>
 export const executeSkill = (id, input) =>
   api.post(`/skills/${id}/execute`, { input });
 
+/** Fetch all versions of a skill */
+export const getSkillVersions = (id) => api.get(`/skills/${id}/versions`);
+
+/** Compare two versions of a skill */
+export const compareSkillVersions = (from, to) =>
+  api.get(`/skills/versions/compare`, { params: { from, to } });
+
 export default api;

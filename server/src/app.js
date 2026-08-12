@@ -1,21 +1,21 @@
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
+const requestLogger = require('./middleware/requestLogger');
 
 const errorHandler = require('./middleware/errorHandler');
 const skillsRouter = require('./routes/skills');
+const executionsRouter = require('./routes/executions');
 
 const app = express();
 
 // ── Middleware ────────────────────────────────
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*'
+}));
 app.use(express.json({ limit: '1mb' }));
+app.use(requestLogger);
 
-// Morgan request logging: concise format in dev, combined in production
-const logFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
-app.use(morgan(logFormat));
 
-const executionsRouter = require('./routes/executions');
 
 // ── Routes ────────────────────────────────────
 app.use('/api/skills', skillsRouter);

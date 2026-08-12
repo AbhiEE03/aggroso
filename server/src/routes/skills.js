@@ -10,6 +10,7 @@ const { executeTool } = require('../tools/index');
 const { selectToolsFromInstructions } = require('../utils/toolSelector');
 const { UnauthorizedToolError, ApprovalRequiredError } = require('../errors/toolErrors');
 const { startExecution } = require('../services/executionEngine');
+const { generatePlan } = require('../services/geminiPlanner');
 
 const ajv = new Ajv({ strict: false, allErrors: true });
 addFormats(ajv);
@@ -115,6 +116,58 @@ router.get('/', async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────────
+// GET /api/skills/versions/compare
+// Compare two versions of a skill
+// ─────────────────────────────────────────────
+router.get('/versions/compare', async (req, res, next) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) {
+      const err = new Error('Both "from" and "to" version IDs are required');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const [fromSkill, toSkill] = await Promise.all([
+      Skill.findById(from).lean(),
+      Skill.findById(to).lean()
+    ]);
+
+    if (!fromSkill || !toSkill) {
+      const err = new Error('One or both skill versions not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const fieldsToCompare = [
+      'name', 'purpose', 'instructions', 'inputSchema', 'outputSchema',
+      'allowedTools', 'approvalRequiredActions', 'maxSteps'
+    ];
+
+    const diff = {};
+    for (const field of fieldsToCompare) {
+      const fromVal = JSON.stringify(fromSkill[field]);
+      const toVal = JSON.stringify(toSkill[field]);
+      if (fromVal !== toVal) {
+        diff[field] = {
+          old: fromSkill[field],
+          new: toSkill[field]
+        };
+      }
+    }
+
+    return res.json({ diff, from: fromSkill, to: toSkill });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      const castErr = new Error('Invalid skill ID format in query');
+      castErr.statusCode = 400;
+      return next(castErr);
+    }
+    return next(err);
+  }
+});
+
+// ─────────────────────────────────────────────
 // GET /api/skills/:id — Get a single skill by ID
 // ─────────────────────────────────────────────
 router.get('/:id', async (req, res, next) => {
@@ -126,6 +179,42 @@ router.get('/:id', async (req, res, next) => {
       return next(err);
     }
     return res.json(skill);
+  } catch (err) {
+    if (err.name === 'CastError') {
+      const castErr = new Error('Invalid skill ID format');
+      castErr.statusCode = 400;
+      return next(castErr);
+    }
+    return next(err);
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/skills/:id/versions — Get all versions of a skill
+// ─────────────────────────────────────────────
+router.get('/:id/versions', async (req, res, next) => {
+  try {
+    const skill = await Skill.findById(req.params.id).lean();
+    if (!skill) {
+      const err = new Error('Skill not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const versions = [skill];
+    let current = skill;
+
+    // Traverse the chain backwards
+    while (current.previousVersionId) {
+      const prev = await Skill.findById(current.previousVersionId).lean();
+      if (!prev) break; // chain broken
+      versions.push(prev);
+      current = prev;
+    }
+
+    // Reverse to get oldest to newest
+    versions.reverse();
+    return res.json(versions);
   } catch (err) {
     if (err.name === 'CastError') {
       const castErr = new Error('Invalid skill ID format');
@@ -187,6 +276,40 @@ router.put('/:id', async (req, res, next) => {
       mongoErr.details = Object.values(err.errors).map((e) => e.message);
       return next(mongoErr);
     }
+    if (err.name === 'CastError') {
+      const castErr = new Error('Invalid skill ID format');
+      castErr.statusCode = 400;
+      return next(castErr);
+    }
+    return next(err);
+  }
+});
+
+// ─────────────────────────────────────────────
+// DELETE /api/skills/:id — Delete a skill
+// ─────────────────────────────────────────────
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const ExecutionRun = require('../models/ExecutionRun');
+    const skill = await Skill.findById(req.params.id);
+    if (!skill) {
+      const err = new Error('Skill not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    // Check for execution history
+    const historyCount = await ExecutionRun.countDocuments({ skillId: skill._id });
+    if (historyCount > 0) {
+      const err = new Error('Cannot delete a skill that has execution history');
+      err.statusCode = 409;
+      err.details = { hint: 'This skill has been executed. Deleting it would break the execution trace audit trail.' };
+      return next(err);
+    }
+
+    await Skill.findByIdAndDelete(req.params.id);
+    return res.status(204).send();
+  } catch (err) {
     if (err.name === 'CastError') {
       const castErr = new Error('Invalid skill ID format');
       castErr.statusCode = 400;
@@ -301,19 +424,28 @@ router.post('/:id/test', async (req, res, next) => {
       return next(err);
     }
 
-    // Step 2: Select tools to call (PLACEHOLDER — Phase 3 replaces this)
-    const toolsToCall = selectToolsFromInstructions(skill.instructions, skill.allowedTools);
+    // Step 2: Generate plan using Gemini
+    let planSteps = [];
+    try {
+      planSteps = await generatePlan(skill, sampleInput);
+    } catch (err) {
+      const planErr = new Error('Failed to generate test plan via Gemini');
+      planErr.statusCode = 500;
+      planErr.details = err.message;
+      return next(planErr);
+    }
 
     // Step 3: Execute each tool, collecting results
     const toolResults = [];
+    const toolsToCall = planSteps.map((s) => s.tool);
 
-    for (const toolName of toolsToCall) {
-      const stepResult = { tool: toolName, input: sampleInput, output: null, error: null, status: 'success' };
+    for (const step of planSteps) {
+      const stepResult = { tool: step.tool, input: step.toolInput, output: null, error: null, status: 'success' };
 
       try {
         // isApproved is always false in test-run mode
         // taskCreator will throw ApprovalRequiredError here
-        const { output, error } = await executeTool(toolName, sampleInput, skill, { isApproved: false });
+        const { output, error } = await executeTool(step.tool, step.toolInput, skill, { isApproved: false });
         stepResult.output = output;
         stepResult.error = error;
         if (error) stepResult.status = 'tool_error';
@@ -333,26 +465,14 @@ router.post('/:id/test', async (req, res, next) => {
       toolResults.push(stepResult);
     }
 
-    // Also surface any taskCreator entries as "approval required" if it's in allowedTools
-    // but wasn't selected by the keyword matcher (since we exclude it from selection)
-    if (skill.allowedTools.includes('taskCreator') && !toolsToCall.includes('taskCreator')) {
-      toolResults.push({
-        tool: 'taskCreator',
-        input: null,
-        output: null,
-        error: 'taskCreator is a write tool — it requires human approval and cannot run in test mode.',
-        status: 'approval_required',
-      });
-    }
-
     return res.json({
       skillId: skill._id,
       skillName: skill.name,
       sampleInput,
-      toolSelectionMethod: 'keyword_placeholder_phase2',
+      toolSelectionMethod: 'gemini_planner',
       toolsSelected: toolsToCall,
       results: toolResults,
-      warning: 'Tool selection in this response uses keyword matching, NOT real LLM planning. Phase 3 replaces this.',
+      warning: null,
     });
   } catch (err) {
     if (err.name === 'CastError') {

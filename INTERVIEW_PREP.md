@@ -78,7 +78,7 @@ The keyword-based tool selector in Phase 2 is genuinely dumb — it matches subs
 
 Phase 3 is the core engine of the project. It replaces the keyword-based placeholder with real Gemini-driven planning, introduces an async execution loop that actually runs the plan, and implements a pause-and-resume approval gate for write operations.
 
-The system now creates an `ExecutionRun` record the moment execution begins. It calls Gemini (`gemini-1.5-flash`) to generate a structured JSON plan (an array of `{tool, toolInput, reasoning}`). The execution engine then loops through the plan. If it hits a read-only tool, it executes it. If it hits a write tool (like `taskCreator`), it pauses, sets the run status to `awaiting_approval`, and returns early. The user reviews the pending step in the UI, clicks "Approve", and the engine resumes execution from that exact step.
+The system now creates an `ExecutionRun` record the moment execution begins. It calls Gemini (`gemini-3.6-flash`) to generate a structured JSON plan (an array of `{tool, toolInput, reasoning}`). The execution engine then loops through the plan. If it hits a read-only tool, it executes it. If it hits a write tool (like `taskCreator`), it pauses, sets the run status to `awaiting_approval`, and returns early. The user reviews the pending step in the UI, clicks "Approve", and the engine resumes execution from that exact step.
 
 We also built `ExecutionView.jsx` — a live-updating trace UI that polls the backend until the run reaches a terminal state.
 
@@ -99,5 +99,66 @@ The polling UI in `ExecutionView.jsx`. It polls every 2.5 seconds while the run 
 
 ### Why X Over Y
 
-**Why `gemini-1.5-flash` instead of `gemini-1.5-pro`?**
+**Why `gemini-3.6-flash` instead of a Pro model?**
 For this specific task — reading a prompt and outputting a short JSON array — Flash is the perfect fit. It's incredibly fast, natively supports JSON output, and has "thinking" capabilities for reasoning. Pro would be slower without any noticeable improvement in the rigid JSON structure we require. Speed matters when the user is staring at a "Planning..." spinner.
+
+---
+
+## Phase 4 Entry — 2026-08-12
+
+### What Was Built and Why
+
+Phase 4 introduces version history, diff comparison, and audit logs. In a dynamic agent platform, it's not enough to know what a skill does *right now*—you have to know what it did *last Tuesday* when a critical execution ran. 
+
+We added backend endpoints to traverse a skill's `previousVersionId` chain and compute structured JSON differences between two versions. On the frontend, the Skill Detail page now displays a Version History timeline, allowing users to explicitly execute older versions of a skill and view a side-by-side comparison of what changed between them. We also exposed the paginated execution history and a detailed Audit Log viewer for transparency.
+
+### The 2–3 Trickiest Design Decisions
+
+**1. Why is the "diff" logic computed on the backend instead of the frontend?**
+We could have just sent both versions to the client and let React compute the diff. However, keeping it on the backend ensures the comparison logic is strictly bound to the data model. If we ever add a new field to the schema, we update the backend diff logic and all clients (API users, frontend) automatically get the correct diff structure. It also reduces payload size for large schemas since we only send the fields that actually changed (alongside the base documents).
+
+**2. How do we execute an older version?**
+Because every version is its own immutable `Skill` document in the database, the execution engine (`/api/skills/:id/execute`) inherently supports executing historical versions! The frontend simply calls the execute endpoint with the historical version's `_id`. The execution engine looks up the document, sees the old instructions and old `allowedTools`, and obeys them perfectly. No special "historical execution" logic was needed.
+
+**3. Why walk the `previousVersionId` chain on the server for history, instead of just querying by `name`?**
+Users might rename a skill in a draft. If we grouped versions by `name`, a renamed skill would suddenly break its history. The linked list approach (`previousVersionId`) guarantees we are looking at the exact cryptographic lineage of that specific skill, regardless of what cosmetic fields changed along the way.
+
+### One Known Weak Point
+
+The `GET /:id/versions` endpoint walks the linked list backwards using a while loop that performs `findById` on each step. For a skill with 5 versions, that's 5 sequential database queries. In a massive scale app, this would be an N+1 query problem. A better approach for production would be a recursive graph query (like `$graphLookup` in MongoDB) or storing a `lineageId` on all versions to fetch them in one query. But for < 50 versions, the sequential fetch is trivial and much simpler to implement.
+
+### Why X Over Y
+
+**Why not use a standard JSON Patch format for diffs?** JSON Patch (RFC 6902) returns operations like `[{ op: "replace", path: "/instructions", value: "new" }]`. While powerful for programmatic patching, it's terrible for UI rendering. Our custom diff object `{"field": {"old": x, "new": y}}` is specifically designed to be trivially mappable in a React component for a side-by-side view.
+
+---
+
+## Phase 5 Entry — 2026-08-12
+
+### What Was Built and Why
+
+Phase 5 focused on hardening the application for production. While the happy paths worked great, we needed to ensure the system gracefully handled edge cases, produced observable logs, and had polished UI states.
+
+We introduced a lightweight structured JSON logger that replaced scattered `console.log` statements, ensuring every API request and critical agent workflow event (like a tool failing or a plan generating) logs in a consistent `{"timestamp", "level", "message", "meta"}` format. We also added UI loading states for the initial fetching of skills and gracefully handled Gemini API timeouts using `Promise.race`. Finally, we locked down skill deletions to prevent users from accidentally deleting skills that have execution history, which would otherwise corrupt the audit trail.
+
+### The 2–3 Trickiest Design Decisions
+
+**1. Why use a custom logger instead of Winston or Pino?**
+For a take-home assignment, adding heavy logging dependencies can bloat the setup. A custom 15-line structured logger wrapper around `console.log` provides 90% of the value (searchable JSON format in Datadog/CloudWatch) with zero external dependencies, demonstrating an understanding of production observability without over-engineering.
+
+**2. Why handle Gemini API timeouts manually?**
+Sometimes LLM APIs hang indefinitely rather than throwing a clean 502/504 error. By wrapping the `model.generateContent(prompt)` call in a `Promise.race` with a 30-second timeout, we guarantee that the execution engine never gets stuck in the `planning` state forever. It cleanly fails the run, logs the timeout, and lets the user retry.
+
+**3. Why block deleting skills with history instead of cascading the deletion?**
+In an agent platform, the execution trace is an audit log. If a user deletes "Customer Support Skill V1", and the system cascades that deletion to all ExecutionRuns that used V1, we lose the historical record of *what the agent did and why*. Blocking the deletion of the Skill preserves the cryptographic integrity of the audit log.
+
+### Likely Interview Questions & Answers
+
+**Q: How does your idempotency mechanism actually work?**
+A: When Gemini generates the plan, the backend assigns a deterministic hash to any write-tool step based on `hash(executionId + stepNumber + toolInput)`. This is passed to the tool as `idempotencyKey` and used as a unique index in the database. If the engine crashes after the tool writes to the DB but before marking the step as "success", a resumed execution will attempt to write the exact same record with the exact same key. The database throws a duplicate key error, which the tool catches and handles gracefully, preventing double-writes.
+
+**Q: Why single-agent Gemini Flash instead of a multi-agent system?**
+A: The problem constraints explicitly requested a rigid, schema-bound execution flow with human approval gates. Multi-agent systems excel at open-ended, ambiguous tasks (e.g. "research this company and write a report") but are overly complex and non-deterministic for structured data processing. Gemini Flash is extremely fast, supports forced JSON output, and handles the planning perfectly in a single call.
+
+**Q: What is the biggest known limitation of this architecture?**
+A: The frontend uses simple HTTP polling every 2.5 seconds to refresh the execution trace. While acceptable for a prototype, this would overwhelm the database and network in a high-traffic production app. I would replace this with Server-Sent Events (SSE) or WebSockets to push status updates from the execution engine directly to the client.

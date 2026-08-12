@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getSkill, publishSkill, executeSkill } from '../api/skills';
+import { getSkill, publishSkill, executeSkill, getSkillVersions } from '../api/skills';
 import TestSkillPanel from '../components/TestSkillPanel';
 import { buildDefaultInput } from '../utils/schemaHelpers';
 
@@ -12,6 +12,8 @@ export default function SkillDetail() {
   const [error, setError] = useState(null);
   const [publishing, setPublishing] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [versions, setVersions] = useState([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
 
   const fetchSkill = async () => {
     try {
@@ -30,7 +32,22 @@ export default function SkillDetail() {
     }
   };
 
-  useEffect(() => { fetchSkill(); }, [id]);
+  const fetchVersions = async () => {
+    try {
+      setVersionsLoading(true);
+      const res = await getSkillVersions(id);
+      setVersions(res.data);
+    } catch (err) {
+      console.error('Failed to fetch versions', err);
+    } finally {
+      setVersionsLoading(false);
+    }
+  };
+
+  useEffect(() => { 
+    fetchSkill(); 
+    fetchVersions();
+  }, [id]);
 
   const handlePublish = async () => {
     if (!window.confirm('Publish this skill? Published skills cannot be edited.')) return;
@@ -45,12 +62,12 @@ export default function SkillDetail() {
     }
   };
 
-  const handleExecute = async () => {
+  const handleExecute = async (executeId = id, schema = skill.inputSchema) => {
     // Build default input from inputSchema for the quick-launch button
-    const defaultInput = buildDefaultInput(skill.inputSchema);
+    const defaultInput = buildDefaultInput(schema);
     setExecuting(true);
     try {
-      const res = await executeSkill(id, defaultInput);
+      const res = await executeSkill(executeId, defaultInput);
       navigate(`/executions/${res.data._id}`);
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to start execution');
@@ -117,7 +134,7 @@ export default function SkillDetail() {
           <button
             id="execute-skill-btn"
             className="btn btn-primary"
-            onClick={handleExecute}
+            onClick={() => handleExecute()}
             disabled={executing}
           >
             {executing ? 'Starting…' : '▶ Execute with Gemini'}
@@ -234,10 +251,55 @@ export default function SkillDetail() {
         )}
       </div>
 
-      {/* Test Skill Panel — shown for all skills (published gets the full test, draft gets a preview) */}
+      {/* Test Skill Panel */}
       <div className="card" style={{ marginTop: '16px' }}>
         <TestSkillPanel skill={skill} />
       </div>
+
+      {/* Version History Panel */}
+      {versions.length > 0 && (
+        <div className="card" style={{ marginTop: '16px' }}>
+          <h2 className="detail-section-title">Version History</h2>
+          {versionsLoading ? (
+            <p>Loading versions...</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {versions.map((v, idx) => (
+                <div key={v._id} style={{ padding: '12px', border: '1px solid var(--border)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span className="version-chip" style={{ marginRight: '8px' }}>v{v.version}</span>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                      Published {new Date(v.createdAt).toLocaleDateString()}
+                    </span>
+                    {v._id === skill._id && (
+                      <span className="badge badge-published" style={{ marginLeft: '8px' }}>Current</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {v.status === 'published' && v._id !== skill._id && (
+                      <button 
+                        className="btn btn-sm btn-ghost" 
+                        onClick={() => handleExecute(v._id, v.inputSchema)}
+                        disabled={executing}
+                      >
+                        ▶ Rerun
+                      </button>
+                    )}
+                    {idx > 0 && (
+                      <Link 
+                        to={`/skills/compare?from=${versions[idx - 1]._id}&to=${v._id}`}
+                        className="btn btn-sm btn-ghost"
+                      >
+                        Compare with v{versions[idx - 1].version}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }

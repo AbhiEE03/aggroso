@@ -40,6 +40,11 @@ export default function ExecutionView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null); // 'approve-N', 'reject-N', 'cancel'
+  const [expandedSteps, setExpandedSteps] = useState({});
+
+  const toggleStep = (stepNum) => {
+    setExpandedSteps((prev) => ({ ...prev, [stepNum]: !prev[stepNum] }));
+  };
 
   const load = useCallback(async () => {
     try {
@@ -253,79 +258,91 @@ export default function ExecutionView() {
         </div>
       )}
 
-      {/* Step trace */}
+      {/* Step trace (Temporal style) */}
       {execution.steps && execution.steps.length > 0 && (
-        <div className="card" style={{ marginBottom: '16px' }}>
-          <div className="detail-section-title" style={{ marginBottom: '14px' }}>Step Trace</div>
-          {execution.steps.map((step) => {
-            const style = STEP_STATUS_STYLE[step.status] || STEP_STATUS_STYLE.pending;
-            const isAwaitingApproval = step.requiresApproval && step.approvalStatus === 'pending' && step.status === 'pending';
-            return (
-              <div
-                key={step.stepNumber}
-                style={{
-                  borderLeft: `3px solid ${isAwaitingApproval ? 'var(--accent-orange)' : style.color}`,
-                  paddingLeft: '14px',
-                  marginBottom: '16px',
-                  opacity: step.status === 'pending' && !isAwaitingApproval ? 0.5 : 1,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                  <span style={{ color: style.color, fontWeight: 700, fontSize: '16px' }}>{style.icon}</span>
-                  <span style={{ fontWeight: 600, fontSize: '14px' }}>
-                    Step {step.stepNumber}
-                  </span>
-                  <span className="tool-tag">{step.tool}</span>
-                  {step.requiresApproval && (
-                    <span
-                      style={{
-                        fontSize: '10px',
-                        background: 'rgba(247,159,79,0.15)',
-                        color: 'var(--accent-orange)',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {step.approvalStatus === 'approved' ? 'APPROVED' : step.approvalStatus === 'rejected' ? 'REJECTED' : 'NEEDS APPROVAL'}
-                    </span>
+        <div className="card" style={{ marginBottom: '16px', padding: 0, overflow: 'hidden' }}>
+          <div className="detail-section-title" style={{ padding: '20px 20px 0', borderBottom: 'none', marginBottom: 0 }}>
+            Activity History
+          </div>
+          <div className="temporal-timeline">
+            {execution.steps.map((step) => {
+              const style = STEP_STATUS_STYLE[step.status] || STEP_STATUS_STYLE.pending;
+              const isAwaitingApproval = step.requiresApproval && step.approvalStatus === 'pending' && step.status === 'pending';
+              const isExpanded = expandedSteps[step.stepNumber] || isAwaitingApproval || step.status === 'failed';
+
+              return (
+                <div key={step.stepNumber} className="temporal-row">
+                  <div className="temporal-row-header" onClick={() => toggleStep(step.stepNumber)}>
+                    <div className="temporal-icon" style={{ color: isAwaitingApproval ? 'var(--accent-orange)' : style.color }}>
+                      {isAwaitingApproval ? '⏸' : style.icon}
+                    </div>
+                    <div className="temporal-step-info">
+                      <span className="temporal-step-id">Step {step.stepNumber}</span>
+                      <span className="temporal-step-tool">{step.tool}</span>
+                      {step.requiresApproval && (
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            background: 'rgba(247,159,79,0.15)',
+                            color: 'var(--accent-orange)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {step.approvalStatus === 'approved' ? 'APPROVED' : step.approvalStatus === 'rejected' ? 'REJECTED' : 'NEEDS APPROVAL'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="temporal-step-timestamp">
+                      {isExpanded ? '▼' : '▶'}
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="temporal-row-body">
+                      <div className="temporal-payload-section">
+                        <div className="temporal-payload-title">Reasoning</div>
+                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0' }}>{step.reasoning}</p>
+                      </div>
+
+                      {step.toolInput && (
+                        <div className="temporal-payload-section">
+                          <div className="temporal-payload-title">Input Payload</div>
+                          <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(step.toolInput, null, 2)}</pre>
+                        </div>
+                      )}
+
+                      {step.toolOutput && (
+                        <div className="temporal-payload-section">
+                          <div className="temporal-payload-title" style={{ color: 'var(--accent-green)' }}>Output Payload</div>
+                          <pre className="code-block" style={{ margin: 0 }}>{JSON.stringify(step.toolOutput, null, 2)}</pre>
+                        </div>
+                      )}
+
+                      {step.error && (
+                        <div className="temporal-payload-section">
+                          <div className="temporal-payload-title" style={{ color: 'var(--accent-red)' }}>Error</div>
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              color: 'var(--accent-red)',
+                              background: 'var(--accent-red-dim)',
+                              padding: '12px',
+                              borderRadius: 'var(--radius)',
+                              border: '1px solid rgba(238,0,0,0.3)',
+                            }}
+                          >
+                            {step.error}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 8px' }}>
-                  {step.reasoning}
-                </p>
-                {step.toolInput && (
-                  <div style={{ marginBottom: '6px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Input</span>
-                    <pre className="code-block" style={{ marginTop: '4px', fontSize: '11px' }}>
-                      {JSON.stringify(step.toolInput, null, 2)}
-                    </pre>
-                  </div>
-                )}
-                {step.toolOutput && (
-                  <div style={{ marginBottom: '6px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--accent-green)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Output</span>
-                    <pre className="code-block" style={{ marginTop: '4px', fontSize: '11px' }}>
-                      {JSON.stringify(step.toolOutput, null, 2)}
-                    </pre>
-                  </div>
-                )}
-                {step.error && (
-                  <div
-                    style={{
-                      fontSize: '12px',
-                      color: 'var(--accent-red)',
-                      background: 'var(--accent-red-dim)',
-                      padding: '6px 8px',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    {step.error}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -384,7 +401,14 @@ export default function ExecutionView() {
                 >
                   [{entry.actorType}]
                 </span>
-                <span style={{ color: 'var(--text-secondary)' }}>{entry.action}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  {entry.action}
+                  {entry.detail && (
+                    <pre style={{ margin: '4px 0 0', fontSize: '10px', background: 'var(--bg-primary)', padding: '4px', borderRadius: '4px' }}>
+                      {JSON.stringify(entry.detail, null, 2)}
+                    </pre>
+                  )}
+                </span>
               </div>
             ))}
           </div>

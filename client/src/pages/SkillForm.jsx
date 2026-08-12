@@ -29,6 +29,7 @@ export default function SkillForm() {
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [loadError, setLoadError] = useState(null);
+  const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [serverErrors, setServerErrors] = useState([]);
@@ -66,6 +67,8 @@ export default function SkillForm() {
         });
       } catch (err) {
         setLoadError(err.response?.data?.message || 'Failed to load skill');
+      } finally {
+        setLoading(false);
       }
     };
     load();
@@ -175,6 +178,14 @@ export default function SkillForm() {
 
   if (loadError) {
     return <div className="alert alert-error">{loadError}</div>;
+  }
+
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <div className="spinner" /> Loading skill…
+      </div>
+    );
   }
 
   return (

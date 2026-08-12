@@ -10,5 +10,6 @@ export const rejectStep = (executionId, stepNumber, rejectedBy = 'user') =>
   api.post(`/${executionId}/steps/${stepNumber}/reject`, { rejectedBy });
 export const cancelExecution = (executionId) =>
   api.post(`/${executionId}/cancel`);
+export const getExecutionAuditLog = (id) => api.get(`/${id}/audit-log`);
 
 export default api;

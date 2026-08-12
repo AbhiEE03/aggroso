@@ -77,7 +77,9 @@ const SEEDED_DOCS = [
 const scoreDoc = (doc, terms) => {
   const text = `${doc.title} ${doc.body} ${doc.tags.join(' ')}`.toLowerCase();
   return terms.reduce((score, term) => {
-    const re = new RegExp(term.toLowerCase(), 'g');
+    // Escape regex special characters to prevent invalid regex errors
+    const escapedTerm = term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(escapedTerm, 'g');
     const matches = text.match(re);
     return score + (matches ? matches.length : 0);
   }, 0);
@@ -88,10 +90,16 @@ const scoreDoc = (doc, terms) => {
  * @returns {{ output: { results: Array, totalFound: number } | null, error: string | null }}
  */
 const docSearch = (input) => {
-  const query = input?.query ?? String(input);
+  let query = '';
+  if (input && typeof input.query === 'string') {
+    query = input.query;
+  } else if (typeof input === 'string') {
+    query = input;
+  }
+
   const limit = Math.min(input?.limit ?? 3, 5);
 
-  if (!query || typeof query !== 'string' || query.trim().length === 0) {
+  if (!query || query.trim().length === 0) {
     return { output: null, error: 'Input must have a "query" field with a non-empty string' };
   }
 

@@ -35,6 +35,34 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────────
+// GET /api/executions/:id/audit-log
+// Get the audit log for a specific execution run
+// ─────────────────────────────────────────────
+router.get('/:id/audit-log', async (req, res, next) => {
+  try {
+    const run = await ExecutionRun.findById(req.params.id).lean();
+    if (!run) {
+      const err = new Error('Execution run not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const logs = await AuditLog.find({ executionId: run._id })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    return res.json(logs);
+  } catch (err) {
+    if (err.name === 'CastError') {
+      const e = new Error('Invalid execution ID format');
+      e.statusCode = 400;
+      return next(e);
+    }
+    return next(err);
+  }
+});
+
+// ─────────────────────────────────────────────
 // GET /api/executions?skillId=xxx
 // List execution runs, optionally filtered by skillId or status
 // ─────────────────────────────────────────────
@@ -44,12 +72,25 @@ router.get('/', async (req, res, next) => {
     if (req.query.skillId) filter.skillId = req.query.skillId;
     if (req.query.status) filter.status = req.query.status;
 
-    const runs = await ExecutionRun.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean();
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = 20;
+    const skip = (page - 1) * limit;
 
-    return res.json(runs);
+    const [runs, total] = await Promise.all([
+      ExecutionRun.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      ExecutionRun.countDocuments(filter)
+    ]);
+
+    return res.json({
+      data: runs,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     return next(err);
   }

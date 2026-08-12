@@ -3,6 +3,8 @@ import SkillList from './pages/SkillList';
 import SkillForm from './pages/SkillForm';
 import SkillDetail from './pages/SkillDetail';
 import ExecutionView from './pages/ExecutionView';
+import ExecutionList from './pages/ExecutionList';
+import SkillCompare from './pages/SkillCompare';
 
 export default function App() {
   return (
@@ -26,6 +28,12 @@ export default function App() {
             >
               + New Skill
             </NavLink>
+            <NavLink
+              to="/executions"
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              Executions
+            </NavLink>
           </div>
         </nav>
 
@@ -33,8 +41,10 @@ export default function App() {
           <Routes>
             <Route path="/" element={<SkillList />} />
             <Route path="/skills/new" element={<SkillForm />} />
+            <Route path="/skills/compare" element={<SkillCompare />} />
             <Route path="/skills/:id/edit" element={<SkillForm />} />
             <Route path="/skills/:id" element={<SkillDetail />} />
+            <Route path="/executions" element={<ExecutionList />} />
             <Route path="/executions/:id" element={<ExecutionView />} />
           </Routes>
         </main>

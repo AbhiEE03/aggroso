@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const logger = require('../utils/logger');
 
-const PLANNING_MODEL = 'gemini-1.5-flash';
+const PLANNING_MODEL = 'gemini-3.6-flash';
 
 let genAI;
 const getClient = () => {
@@ -133,7 +134,11 @@ const generatePlan = async (skill, userInput) => {
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const result = await model.generateContent(prompt);
+      const generatePromise = model.generateContent(prompt);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini API timeout')), 30000)
+      );
+      const result = await Promise.race([generatePromise, timeoutPromise]);
       const text = result.response.text().trim();
 
       // Strip markdown code fences if the model adds them despite the instruction
@@ -168,7 +173,9 @@ const generatePlan = async (skill, userInput) => {
     } catch (err) {
       lastError = err;
       if (attempt < 2) {
-        console.warn(`[Planner] Attempt ${attempt} failed: ${err.message}. Retrying…`);
+        logger.warn(`[Planner] Attempt ${attempt} failed: ${err.message}. Retrying…`);
+      } else {
+        logger.error(`[Planner] Final attempt failed: ${err.message}`);
       }
     }
   }
