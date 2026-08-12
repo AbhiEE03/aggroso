@@ -9,8 +9,15 @@ const executionsRouter = require('./routes/executions');
 const app = express();
 
 // ── Middleware ────────────────────────────────
+let originConfig = '*';
+if (process.env.CORS_ORIGIN) {
+  // Allow comma-separated origins and handle accidental trailing slashes
+  const origins = process.env.CORS_ORIGIN.split(',').map(o => o.trim());
+  originConfig = [...new Set([...origins, ...origins.map(o => o.replace(/\/$/, ''))])];
+}
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*'
+  origin: originConfig
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(requestLogger);
