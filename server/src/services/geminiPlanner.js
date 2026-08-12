@@ -1,6 +1,6 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const PLANNING_MODEL = 'gemini-2.5-flash';
+const PLANNING_MODEL = 'gemini-1.5-flash';
 
 let genAI;
 const getClient = () => {

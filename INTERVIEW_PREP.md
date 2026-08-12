@@ -78,7 +78,7 @@ The keyword-based tool selector in Phase 2 is genuinely dumb — it matches subs
 
 Phase 3 is the core engine of the project. It replaces the keyword-based placeholder with real Gemini-driven planning, introduces an async execution loop that actually runs the plan, and implements a pause-and-resume approval gate for write operations.
 
-The system now creates an `ExecutionRun` record the moment execution begins. It calls Gemini (`gemini-2.5-flash`) to generate a structured JSON plan (an array of `{tool, toolInput, reasoning}`). The execution engine then loops through the plan. If it hits a read-only tool, it executes it. If it hits a write tool (like `taskCreator`), it pauses, sets the run status to `awaiting_approval`, and returns early. The user reviews the pending step in the UI, clicks "Approve", and the engine resumes execution from that exact step.
+The system now creates an `ExecutionRun` record the moment execution begins. It calls Gemini (`gemini-1.5-flash`) to generate a structured JSON plan (an array of `{tool, toolInput, reasoning}`). The execution engine then loops through the plan. If it hits a read-only tool, it executes it. If it hits a write tool (like `taskCreator`), it pauses, sets the run status to `awaiting_approval`, and returns early. The user reviews the pending step in the UI, clicks "Approve", and the engine resumes execution from that exact step.
 
 We also built `ExecutionView.jsx` — a live-updating trace UI that polls the backend until the run reaches a terminal state.
 
@@ -99,5 +99,5 @@ The polling UI in `ExecutionView.jsx`. It polls every 2.5 seconds while the run 
 
 ### Why X Over Y
 
-**Why `gemini-2.5-flash` instead of `gemini-2.5-pro`?**
+**Why `gemini-1.5-flash` instead of `gemini-1.5-pro`?**
 For this specific task — reading a prompt and outputting a short JSON array — Flash is the perfect fit. It's incredibly fast, natively supports JSON output, and has "thinking" capabilities for reasoning. Pro would be slower without any noticeable improvement in the rigid JSON structure we require. Speed matters when the user is staring at a "Planning..." spinner.
